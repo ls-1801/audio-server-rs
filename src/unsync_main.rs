@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::cell::RefCell;
+use std::sync;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 #[derive(Clone, Debug)]
@@ -48,9 +49,6 @@ async fn main() {
         }
         Ok(())
     }
-    let silence_chunk = Chunk {
-        data: vec![0; 10 * args.chunk_size as usize].into(),
-    };
 
     let chunks = RefCell::new(vec![]);
     visit_dirs(&args.audio_dir, &|entry| {
@@ -71,27 +69,12 @@ async fn main() {
             })
             .collect::<Vec<_>>();
         chunks.borrow_mut().extend(file_chunks);
-        chunks.borrow_mut().push(silence_chunk.clone());
         println!("Loaded: {:?}", entry.path());
     })
     .expect("TODO: panic message");
 
     println!("Loaded {} chunks", chunks.borrow().len());
-
-    let (tx, rx) = tokio::sync::broadcast::channel::<Controller>(10);
-    tokio::spawn(async move {
-        let chunks = chunks.take();
-        loop {
-            for c in &chunks {
-                tx.send(Controller::Chunk(c.clone())).unwrap();
-                tokio::time::sleep(tokio::time::Duration::from_micros(
-                    (1000 * (c.data.len() / 2) / 16) as u64,
-                ))
-                .await;
-            }
-            tx.send(Controller::EndOfLoop).unwrap();
-        }
-    });
+    let chunks = Arc::new(chunks.take());
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port))
         .await
@@ -100,25 +83,17 @@ async fn main() {
         let (mut stream, connection) = listener.accept().await.unwrap();
         println!("Accepted connection from {}", connection);
         tokio::spawn({
-            let mut rx = rx.resubscribe();
+            let chunks = chunks.clone();
             async move {
                 loop {
-                    if let Controller::EndOfLoop = rx.recv().await.unwrap() {
-                        break;
+                    for chunk in chunks.iter() {
+                        let Ok(_) = stream.write_all(chunk.data.as_ref()).await else {
+                            return;
+                        };
                     }
-                }
-
-                loop {
-                    let Controller::Chunk(chunk) = rx.recv().await.unwrap() else {
-                        if args.r#loop {
-                            continue;
-                        }
-                        break;
-                    };
-
-                    let Ok(_) = stream.write_all(chunk.data.as_ref()).await else {
+                    if !args.r#loop {
                         return;
-                    };
+                    }
                 }
             }
         });

@@ -21,17 +21,8 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user
-RUN useradd -r -s /bin/false appuser
-
 # Copy the binary from builder stage
 COPY --from=builder /usr/src/app/target/release/audio-server /usr/local/bin/audio-server
-
-# Change ownership to non-root user
-RUN chown appuser:appuser /usr/local/bin/audio-server
-
-# Switch to non-root user
-USER appuser
 
 # Expose port (adjust as needed)
 EXPOSE 8080
