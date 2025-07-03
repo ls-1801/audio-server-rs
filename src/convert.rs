@@ -54,7 +54,7 @@ fn main() {
 
             let mut output = File::create(output).unwrap();
 
-            let mut current_duration = std::time::Duration::from_nanos(0);
+            let mut current_duration = std::time::Duration::from_secs(1);
             let increment = std::time::Duration::from_nanos(
                 (std::time::Duration::from_secs(1).as_nanos() / wav.spec().sample_rate as u128)
                     as u64,
